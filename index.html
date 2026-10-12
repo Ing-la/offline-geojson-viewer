@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GeoJSON 查看器（离线）</title>
+    <link rel="stylesheet" href="./leaflet.css" />
+    <style>
+        :root {
+            --bg: #f6f7f9;
+            --panel: #ffffff;
+            --border: #e6e8eb;
+            --border-2: #d5d9de;
+            --text: #1c2024;
+            --dim: #6b7280;
+            --faint: #9aa1ab;
+            --accent: #2f6fed;
+            --accent-h: #2559c9;
+            --accent-soft: #eef3fe;
+            --danger: #e5484d;
+            --r: 9px;
+            --r-sm: 7px;
+            --sh-sm: 0 1px 2px rgba(16,24,40,.06);
+            --sh: 0 6px 16px rgba(16,24,40,.08);
+            --sh-lg: 0 12px 32px rgba(16,24,40,.14);
+            --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", Roboto, Arial, sans-serif;
+            --mono: "Cascadia Code", Consolas, "SF Mono", Menlo, monospace;
+        }
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0; height: 100vh; overflow: hidden;
+            display: flex; flex-direction: column;
+            font: 13px/1.5 var(--font); color: var(--text); background: var(--bg);
+            -webkit-font-smoothing: antialiased;
+        }
+        button, select, input, textarea { font-family: inherit; }
+        svg { display: block; }
+
+        /* ── 顶栏 ── */
+        .appbar {
+            flex: 0 0 auto; display: flex; align-items: center; gap: 14px;
+            height: 54px; padding: 0 14px; position: relative; z-index: 1200;
+            background: var(--panel); border-bottom: 1px solid var(--border);
+            box-shadow: var(--sh-sm);
+        }
+        .brand { display: flex; align-items: center; gap: 9px; white-space: nowrap;
+                 font-size: 14px; font-weight: 650; letter-spacing: .2px; }
+        .brand .dot { width: 11px; height: 11px; border-radius: 3px;
+                      background: linear-gradient(135deg, #5a94ff, var(--accent));
+                      box-shadow: 0 0 0 3px var(--accent-soft); }
+        .badge { font-size: 11px; font-weight: 500; color: var(--faint);
+                 background: #f1f3f5; border: 1px solid var(--border);
+                 border-radius: 99px; padding: 1px 8px; }
+        .tools { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+        .grp { display: flex; align-items: center; gap: 6px; }
+        .sep { width: 1px; height: 22px; background: var(--border); }
+        .tool-label { font-size: 12px; color: var(--dim); }
+
+        /* ── 按钮 ── */
+        .btn {
+            display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 11px;
+            border: 1px solid var(--border-2); border-radius: var(--r-sm);
+            background: var(--panel); color: var(--text);
+            font-size: 12.5px; font-weight: 500; cursor: pointer; white-space: nowrap;
+            transition: background .12s, border-color .12s, color .12s, box-shadow .12s;
+        }
+        .btn:hover { background: #f4f6f8; border-color: #c3c9d1; }
+        .btn:active { background: #eceff3; }
+        .btn svg { width: 15px; height: 15px; }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: var(--sh-sm); }
+        .btn-primary:hover { background: var(--accent-h); border-color: var(--accent-h); }
+        .btn-ghost { border-color: transparent; background: transparent; color: var(--dim); }
+        .btn-ghost:hover { background: #fbeaea; color: var(--danger); border-color: transparent; }
+        .btn.active { background: var(--accent-soft); border-color: #bcd0f7; color: var(--accent); }
+
+        /* ── 下拉 ── */
+        .select {
+            height: 32px; padding: 0 26px 0 10px; border-radius: var(--r-sm);
+            border: 1px solid var(--border-2); color: var(--text); font-size: 12.5px; cursor: pointer;
+            appearance: none; -webkit-appearance: none;
+            background: var(--panel) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.4' stroke-linecap='round'><polyline points='6 9 12 15 18 9'/></svg>") no-repeat right 8px center;
+        }
+        .select:hover { border-color: #c3c9d1; }
+
+        /* ── 主体 ── */
+        .body { flex: 1; min-height: 0; display: flex; gap: 10px; padding: 10px; }
+        .side {
+            flex: 0 0 258px; width: 258px; display: flex; flex-direction: column; overflow: hidden;
+            background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+            box-shadow: var(--sh-sm);
+        }
+        body.side-hidden .side { display: none; }
+        .side-head { display: flex; align-items: center; justify-content: space-between;
+                     padding: 9px 12px; border-bottom: 1px solid var(--border);
+                     font-size: 11.5px; font-weight: 600; letter-spacing: .4px;
+                     color: var(--faint); text-transform: uppercase; }
+        .side-actions { display: flex; align-items: center; gap: 2px; }
+        .icon-btn.danger:hover { background: #fbeaea; color: var(--danger); }
+        .side textarea { flex: 1; min-height: 0; border: 0; outline: 0; resize: none;
+                         padding: 10px 12px; background: transparent; color: var(--text);
+                         font: 12px/1.6 var(--mono); }
+        .side textarea::placeholder { color: var(--faint); }
+        .icon-btn { display: inline-flex; align-items: center; justify-content: center;
+                    width: 22px; height: 22px; border: 0; border-radius: 5px; cursor: pointer;
+                    background: transparent; color: var(--faint); font-size: 15px; line-height: 1; }
+        .icon-btn:hover { background: #f1f3f5; color: var(--text); }
+
+        .stage { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+        .mapwrap { flex: 1; position: relative; overflow: hidden; background: #eef1f4;
+                   border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh-sm); }
+        #map { position: absolute; inset: 0; }
+
+        .status { flex: 0 0 auto; max-height: 92px; overflow: auto; padding: 8px 12px;
+                  background: var(--panel); border: 1px solid var(--border); border-radius: var(--r);
+                  box-shadow: var(--sh-sm); color: var(--dim);
+                  font: 12px/1.55 var(--mono); white-space: pre-wrap; }
+
+        /* ── 浮层图例卡片 ── */
+        .overlay {
+            position: absolute; top: 10px; right: 10px; z-index: 1000; min-width: 152px;
+            display: none; max-height: 62%; overflow: auto; padding: 10px 12px;
+            background: rgba(255,255,255,.97); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+            border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--sh);
+            font-size: 12px;
+        }
+        .swatch { flex: 0 0 auto; width: 15px; height: 11px; border-radius: 3px;
+                  box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+        .line-swatch { flex: 0 0 auto; width: 15px; height: 3px; border-radius: 2px; }
+
+        /* 图层卡片头：数量 + 批量操作 */
+        .ov-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+        .ov-title { font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+                    color: var(--faint); text-transform: uppercase; white-space: nowrap; }
+        .ov-acts { margin-left: auto; display: flex; gap: 2px; }
+        .ov-act { border: 0; background: transparent; color: var(--faint); cursor: pointer;
+                  font-size: 11px; font-family: inherit; padding: 1px 5px; border-radius: 4px; }
+        .ov-act:hover { background: #f1f3f5; color: var(--accent); }
+
+        /* 图层行：显隐 · 颜色 · 名称(缩放) · 数量 · 删除(hover 才出现) */
+        .layer-row { display: flex; align-items: center; gap: 6px; padding: 3px 2px; border-radius: 5px; }
+        .layer-row:hover { background: #f6f8fa; }
+        .layer-row input { flex: 0 0 auto; margin: 0; cursor: pointer; accent-color: var(--accent); }
+        .lrow-pick { flex: 0 0 auto; border: 0; padding: 0; background: transparent; cursor: pointer; }
+        .lrow-name { flex: 1 1 auto; min-width: 0; cursor: pointer; color: var(--dim);
+                     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .lrow-name:hover { color: var(--accent); }
+        .layer-row:hover .lrow-name { color: var(--text); }
+        .layer-row .cnt { flex: 0 0 auto; color: var(--faint); font-size: 11px; }
+        .lrow-del { flex: 0 0 auto; border: 0; background: transparent; color: var(--faint);
+                    cursor: pointer; font-family: inherit; font-size: 12px; line-height: 1;
+                    padding: 1px 3px; border-radius: 4px; opacity: 0;
+                    transition: opacity .12s, background .12s, color .12s; }
+        .layer-row:hover .lrow-del { opacity: 1; }
+        .lrow-del:hover { background: #fbeaea; color: var(--danger); }
+
+        /* 图层设置浮窗（改名 / 颜色） */
+        .lpop { position: fixed; z-index: 2000; width: 210px; padding: 10px 11px 11px;
+                background: #fff; border: 1px solid var(--border-2); border-radius: var(--r);
+                box-shadow: var(--sh-lg); font-size: 12px; color: var(--text); }
+        .lpop label { display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .6px;
+                      color: var(--faint); text-transform: uppercase; margin-bottom: 5px; }
+        .lpop input[type=text] { width: 100%; height: 28px; padding: 0 8px; margin-bottom: 10px;
+                                 border: 1px solid var(--border-2); border-radius: 6px;
+                                 font: 12px var(--font); color: var(--text); }
+        .lpop input[type=text]:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+        .lpop .grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+        .lpop .dot { width: 100%; height: 18px; padding: 0; border: 0; border-radius: 4px;
+                     cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.12); }
+        .lpop .dot.on { box-shadow: 0 0 0 2px #fff, 0 0 0 4px var(--accent); }
+        .lpop .custom { display: flex; align-items: center; gap: 7px; margin-top: 9px;
+                        color: var(--dim); font-size: 11px; }
+        .lpop input[type=color] { width: 30px; height: 22px; padding: 0; cursor: pointer;
+                                  border: 1px solid var(--border-2); border-radius: 5px; background: none; }
+
+        /* ── 折叠后的展开把手 ── */
+        .reopen {
+            position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 1500;
+            display: none; align-items: center; justify-content: center;
+            width: 26px; height: 58px; border: 1px solid var(--border); border-left: 0;
+            border-radius: 0 var(--r) var(--r) 0; background: var(--panel); color: var(--dim);
+            box-shadow: var(--sh); cursor: pointer;
+        }
+        .reopen:hover { color: var(--accent); }
+        body.side-hidden .reopen { display: flex; }
+
+        /* ── 测量标签 / 鼠标坐标 ── */
+        .measure-label { color: var(--danger); font-weight: 700; font-size: 12px; }
+        .coord-box { font: 12px var(--mono); color: var(--text); }
+        /* 测量模式下图层穿透：点击落到地图（可在任意位置/要素上选点） */
+        .map-measuring .leaflet-pane,
+        .map-measuring .leaflet-interactive { pointer-events: none !important; }
+    </style>
+</head>
+<body>
+    <header class="appbar">
+        <div class="brand"><span class="dot"></span>GeoJSON 查看器<span class="badge">离线</span></div>
+        <div class="tools">
+            <div class="grp">
+                <label class="btn btn-primary" for="fileInput">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                    打开文件
+                </label>
+                <input type="file" id="fileInput" accept=".geojson,.json" multiple hidden />
+                <button class="btn" onclick="renderText()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+                    渲染粘贴
+                </button>
+            </div>
+            <div class="sep"></div>
+            <div class="grp">
+                <button class="btn" id="togglePoints" onclick="togglePoints()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="2.4"/><circle cx="5" cy="6" r="1.9"/><circle cx="19" cy="18" r="1.9"/></svg>
+                    坐标点
+                </button>
+                <button class="btn" id="toggleTile" onclick="toggleTile()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+                    底图
+                </button>
+            </div>
+            <div class="sep"></div>
+            <div class="grp">
+                <span class="tool-label">测量</span>
+                <select id="measureMode" class="select" onchange="setMeasureMode(this.value)">
+                    <option value="">关闭</option>
+                    <option value="line">直线距离</option>
+                    <option value="polyline">折线距离</option>
+                    <option value="area">面积</option>
+                </select>
+            </div>
+            <div class="sep"></div>
+            <button class="btn btn-ghost" onclick="clearAll()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                清空
+            </button>
+        </div>
+    </header>
+
+    <div class="body">
+        <aside class="side">
+            <div class="side-head">
+                JSON 输入
+                <span class="side-actions">
+                    <button class="icon-btn danger" title="清空输入框内容（地图图层不受影响）"
+                            onclick="clearInput()">&#10005;</button>
+                    <button class="icon-btn" title="折叠面板" onclick="toggleInputPanel()">&#8249;</button>
+                </span>
+            </div>
+            <textarea id="jsonInput" placeholder="粘贴 GeoJSON / JSON 后点「渲染粘贴」…"></textarea>
+        </aside>
+        <section class="stage">
+            <div class="mapwrap">
+                <div id="map"></div>
+                <div id="overlay" class="overlay"></div>
+            </div>
+            <div id="info" class="status">要素信息会显示在这里…</div>
+        </section>
+    </div>
+
+    <button class="reopen" title="展开输入面板" onclick="toggleInputPanel()">&#8250;</button>
+
+    <script src="./leaflet.js"></script>
+    <script>
+        var map = L.map('map').setView([39.9, 116.4], 10);
+
+        // 底图（离线默认关闭；有网可开启 OSM）
+        var tile = null;
+        function toggleTile() {
+            var b = document.getElementById('toggleTile');
+            if (tile) { map.removeLayer(tile); tile = null; b.classList.remove('active'); }
+            else {
+                tile = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                   { attribution: '&copy; OSM' }).addTo(map);
+                b.classList.add('active');
+            }
+        }
+
+        function toggleInputPanel() { document.body.classList.toggle('side-hidden'); }
+
+        // 只清输入框里的文本，不动地图上已渲染的图层；清完聚焦，方便直接粘贴下一份
+        function clearInput() {
+            var t = document.getElementById('jsonInput');
+            t.value = '';
+            t.focus();
+        }
+
+        // 自动分配用的调色板，同时也是浮窗里的预设色格：
+        // 这 16 个色彼此区分度够，比自己取色更不容易选出两个看不清的蓝
+        var PALETTE = ['#3498db', '#e74c3c', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c',
+                       '#e67e22', '#34495e', '#16a085', '#c0392b', '#8e44ad', '#27ae60',
+                       '#2980b9', '#d35400', '#7f8c8d', '#f1c40f'];
+
+        var layers = [];       // {name,color,count,types,layer,features,visible}
+        var pasteSeq = 0;      // 粘贴图层的序号，避免全叫「粘贴JSON」分不出来
+        var popEl = null;      // 当前打开的图层设置浮窗
+        var pointsOn = false;
+        var pointsLayer = L.layerGroup();
+
+        function normalizeData(d) {
+            if (d && d.type && d.type !== 'FeatureCollection' && d.type !== 'Feature')
+                return { type: 'FeatureCollection', features: [{ type: 'Feature', properties: {}, geometry: d }] };
+            return d;
+        }
+
+        // 纯线状图层用细线色块，其余用实心色块——色块的形状本身就在说明几何类型
+        function isLineOnly(types) {
+            var keys = Object.keys(types);
+            return keys.length > 0 && keys.every(function (t) {
+                return t === 'LineString' || t === 'MultiLineString';
+            });
+        }
+
+        function styleFor(feature, color) {
+            var t = feature.geometry ? feature.geometry.type : '';
+            if (t === 'LineString' || t === 'MultiLineString')
+                return { color: color, weight: 3, opacity: 0.95, dashArray: '6 4' };
+            return { color: color, weight: 1.5, fillColor: color, fillOpacity: 0.25 };
+        }
+
+        function addLayer(name, data) {
+            var gj = normalizeData(data);
+            var color = PALETTE[layers.length % PALETTE.length];
+            var fc = gj.type === 'Feature' ? { type: 'FeatureCollection', features: [gj] } : gj;
+            var feats = fc.features || [];
+            var types = {};
+            feats.forEach(function (f) {
+                var t = f.geometry ? f.geometry.type : '?';
+                types[t] = (types[t] || 0) + 1;
+            });
+            var layer = L.geoJSON(gj, {
+                onEachFeature: function (feature, lyr) {
+                    var props = feature.properties || {};
+                    var lines = ['【' + name + '】'];
+                    Object.keys(props).forEach(function (k) {
+                        if (props[k] != null && typeof props[k] !== 'object')
+                            lines.push(k + ': ' + props[k]);
+                    });
+                    lyr.bindPopup(lines.join('<br>'));
+                },
+                style: function (feature) { return styleFor(feature, color); }
+            }).addTo(map);
+
+            layers.push({ name: name, color: color, count: feats.length,
+                          types: types, layer: layer, features: feats, visible: true });
+            fitAll(); renderOverlay(); updateInfo();
+            if (pointsOn) rebuildPoints();
+        }
+
+        // 只按可见图层取景——隐藏的不该把视野拽远
+        function fitAll() {
+            var vis = layers.filter(function (l) { return l.visible; });
+            if (!vis.length) return;
+            try {
+                map.fitBounds(L.featureGroup(vis.map(function (l) { return l.layer; })).getBounds(),
+                              { padding: [24, 24] });
+            } catch (e) {}
+        }
+
+        function toggleLayer(i) {
+            var l = layers[i];
+            l.visible = !l.visible;
+            if (l.visible) l.layer.addTo(map); else map.removeLayer(l.layer);
+            renderOverlay();
+        }
+
+        function setAllVisible(v) {
+            layers.forEach(function (l) {
+                l.visible = v;
+                if (v) l.layer.addTo(map); else map.removeLayer(l.layer);
+            });
+            renderOverlay();
+        }
+
+        // 点击图层名：把它带进视野。若它被隐藏了，顺带显示出来
+        function zoomToLayer(i) {
+            var l = layers[i];
+            if (!l.visible) { l.visible = true; l.layer.addTo(map); renderOverlay(); }
+            try {
+                var b = l.layer.getBounds();
+                if (b && b.isValid()) map.fitBounds(b, { padding: [30, 30] });
+            } catch (e) {}
+        }
+
+        function setLayerColor(i, color) {
+            var l = layers[i];
+            l.color = color;
+            l.layer.setStyle(function (feature) { return styleFor(feature, color); });
+            renderOverlay();
+            if (pointsOn) rebuildPoints();
+        }
+
+        function deleteLayer(i) {
+            var l = layers[i];
+            if (!l) return;
+            closeLayerPop();
+            map.removeLayer(l.layer);
+            layers.splice(i, 1);
+            renderOverlay(); updateInfo();
+            if (pointsOn) rebuildPoints();
+            // 粘贴进来的图层没有文件兜底，删了就真没了 —— 所以给一次反悔的机会
+            toastUndo('已删除「' + l.name + '」', function () {
+                layers.splice(i, 0, l);          // 放回原位，层级关系不变
+                if (l.visible) l.layer.addTo(map);
+                renderOverlay(); updateInfo();
+                if (pointsOn) rebuildPoints();
+            });
+        }
+
+        // ── 图层设置浮窗（改名 / 颜色）──
+
+        function closeLayerPop() {
+            if (popEl && popEl.parentNode) popEl.parentNode.removeChild(popEl);
+            popEl = null;
+        }
+
+        function openLayerPop(i, anchor) {
+            closeLayerPop();
+            var l = layers[i];
+
+            var box = document.createElement('div');
+            box.className = 'lpop';
+
+            var lb1 = document.createElement('label'); lb1.textContent = '名称';
+            var inp = document.createElement('input');
+            inp.type = 'text'; inp.value = l.name; inp.spellcheck = false;
+            inp.addEventListener('keydown', function (ev) {
+                if (ev.key === 'Enter') inp.blur();
+                else if (ev.key === 'Escape') closeLayerPop();
+            });
+            inp.addEventListener('change', function () {
+                var v = inp.value.trim();
+                if (v) { l.name = v; renderOverlay(); updateInfo(); }
+            });
+            box.appendChild(lb1); box.appendChild(inp);
+
+            var lb2 = document.createElement('label'); lb2.textContent = '颜色';
+            var grid = document.createElement('div'); grid.className = 'grid';
+            PALETTE.forEach(function (c) {
+                var d = document.createElement('button');
+                d.type = 'button';
+                d.className = 'dot' + (c === l.color ? ' on' : '');
+                d.style.background = c; d.title = c;
+                d.addEventListener('click', function () {
+                    setLayerColor(i, c);
+                    Array.prototype.forEach.call(grid.children, function (x) {
+                        x.classList.toggle('on', x === d);
+                    });
+                });
+                grid.appendChild(d);
+            });
+            box.appendChild(lb2); box.appendChild(grid);
+
+            var cust = document.createElement('div'); cust.className = 'custom';
+            var cl = document.createElement('span'); cl.textContent = '自定义';
+            var ci = document.createElement('input');
+            ci.type = 'color'; ci.value = l.color; ci.title = '自定义颜色';
+            ci.addEventListener('input', function () {
+                setLayerColor(i, ci.value);
+                Array.prototype.forEach.call(grid.children, function (x) {
+                    x.classList.remove('on');
+                });
+            });
+            cust.appendChild(cl); cust.appendChild(ci);
+            box.appendChild(cust);
+
+            document.body.appendChild(box);
+
+            // 贴着色块定位，越界就往回收
+            var r = anchor.getBoundingClientRect();
+            var bw = box.offsetWidth, bh = box.offsetHeight;
+            var left = Math.max(8, Math.min(r.left - 6, window.innerWidth - bw - 8));
+            var top = r.bottom + 6;
+            if (top + bh > window.innerHeight - 8) top = Math.max(8, r.top - bh - 6);
+            box.style.left = left + 'px';
+            box.style.top = top + 'px';
+
+            popEl = box;
+        }
+
+        function renderOverlay() {
+            var el = document.getElementById('overlay');
+            if (!layers.length) { el.style.display = 'none'; el.textContent = ''; closeLayerPop(); return; }
+            el.style.display = 'block';
+            el.textContent = '';
+
+            var head = document.createElement('div'); head.className = 'ov-head';
+            var title = document.createElement('span'); title.className = 'ov-title';
+            title.textContent = '图层 · ' + layers.length;
+            var acts = document.createElement('span'); acts.className = 'ov-acts';
+            acts.appendChild(ovAct('全显', '显示全部图层', function () { setAllVisible(true); }));
+            acts.appendChild(ovAct('全隐', '隐藏全部图层', function () { setAllVisible(false); }));
+            acts.appendChild(ovAct('适配', '缩放到可见图层', fitAll));
+            head.appendChild(title); head.appendChild(acts);
+            el.appendChild(head);
+
+            layers.forEach(function (l, i) {
+                var row = document.createElement('div'); row.className = 'layer-row';
+
+                var cb = document.createElement('input');
+                cb.type = 'checkbox'; cb.checked = l.visible;
+                cb.title = l.visible ? '点击隐藏' : '点击显示';
+                cb.addEventListener('change', function () { toggleLayer(i); });
+                row.appendChild(cb);
+
+                var sw = document.createElement('button');
+                sw.type = 'button';
+                sw.className = 'lrow-pick ' + (isLineOnly(l.types) ? 'line-swatch' : 'swatch');
+                sw.style.background = l.color;
+                sw.title = '改名 / 换颜色';
+                sw.addEventListener('click', function (ev) {
+                    ev.stopPropagation(); openLayerPop(i, sw);
+                });
+                row.appendChild(sw);
+
+                var nm = document.createElement('span');
+                nm.className = 'lrow-name';
+                nm.textContent = l.name;          // textContent：图层名不会当 HTML 解析
+                nm.title = '缩放到该图层';
+                nm.addEventListener('click', function () { zoomToLayer(i); });
+                row.appendChild(nm);
+
+                var cnt = document.createElement('span');
+                cnt.className = 'cnt'; cnt.textContent = l.count;
+                row.appendChild(cnt);
+
+                var del = document.createElement('button');
+                del.type = 'button'; del.className = 'lrow-del';
+                del.textContent = '✕'; del.title = '删除该图层';
+                del.addEventListener('click', function (ev) {
+                    ev.stopPropagation(); deleteLayer(i);
+                });
+                row.appendChild(del);
+
+                el.appendChild(row);
+            });
+        }
+
+        function ovAct(text, title, fn) {
+            var b = document.createElement('button');
+            b.type = 'button'; b.className = 'ov-act';
+            b.textContent = text; b.title = title;
+            b.addEventListener('click', fn);
+            return b;
+        }
+
+        function updateInfo() {
+            var lines = ['共 ' + layers.length + ' 个图层'];
+            layers.forEach(function (l) {
+                lines.push('【' + l.name + '】 ' + l.count + ' 个要素');
+                Object.keys(l.types).forEach(function (t) { lines.push('  ' + t + ': ' + l.types[t]); });
+            });
+            document.getElementById('info').textContent = lines.join('\n');
+        }
+
+        function renderText() {
+            var raw = document.getElementById('jsonInput').value.trim();
+            if (!raw) { alert('请先粘贴 JSON'); return; }
+            try {
+                pasteSeq += 1;
+                addLayer('粘贴 ' + pasteSeq, JSON.parse(raw));
+            } catch (e) { alert('JSON 格式错误：' + e.message); }
+        }
+
+        // 带「撤销」的提示：删除图层后给一次反悔机会（粘贴来的图层没有文件兜底）
+        function toastUndo(msg, onUndo) {
+            var t = document.createElement('div');
+            t.className = 'undo-toast';
+            t.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);'
+                + 'background:rgba(24,28,34,.94);color:#fff;padding:8px 14px;border-radius:8px;'
+                + 'font:12.5px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;'
+                + 'box-shadow:0 8px 24px rgba(16,24,40,.25);z-index:9999;'
+                + 'display:flex;align-items:center;gap:14px;';
+            var s = document.createElement('span'); s.textContent = msg;
+            var b = document.createElement('a');
+            b.textContent = '撤销'; b.href = '#';
+            b.style.cssText = 'color:#8ab4ff;font-weight:700;text-decoration:none;';
+            b.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                cleanup();
+                onUndo();
+            });
+            t.appendChild(s); t.appendChild(b);
+            document.body.appendChild(t);
+            var tm = setTimeout(cleanup, 8000);
+            function cleanup() {
+                clearTimeout(tm);
+                if (t.parentNode) t.parentNode.removeChild(t);
+            }
+        }
+
+        // 点浮窗外面 / 按 Esc 就收起
+        document.addEventListener('mousedown', function (ev) {
+            if (popEl && !popEl.contains(ev.target)) closeLayerPop();
+        });
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape') closeLayerPop();
+        });
+
+        document.getElementById('fileInput').addEventListener('change', function (e) {
+            var files = Array.prototype.slice.call(e.target.files);
+            if (files.length === 0) return;
+            var pending = files.length;
+            files.forEach(function (file) {
+                var reader = new FileReader();
+                reader.onload = function (ev) {
+                    try { addLayer(file.name, JSON.parse(ev.target.result)); }
+                    catch (err) { alert('文件 ' + file.name + ' 解析失败：' + err.message); }
+                    if (--pending === 0) e.target.value = '';
+                };
+                reader.readAsText(file, 'utf-8');
+            });
+        });
+
+        // ── 坐标点 ──
+        function collectPoints(geom) {
+            var out = [];
+            function walk(g) {
+                if (!g) return;
+                var t = g.type;
+                if (t === 'Point') { out.push(g.coordinates); return; }
+                if (t === 'MultiPoint') { for (var a = 0; a < g.coordinates.length; a++) out.push(g.coordinates[a]); return; }
+                if (t === 'LineString') { out.push.apply(out, g.coordinates); return; }
+                if (t === 'MultiLineString' || t === 'Polygon') {
+                    for (var b = 0; b < g.coordinates.length; b++) out.push.apply(out, g.coordinates[b]);
+                    return;
+                }
+                if (t === 'MultiPolygon') {
+                    for (var c = 0; c < g.coordinates.length; c++)
+                        for (var d = 0; d < g.coordinates[c].length; d++) out.push.apply(out, g.coordinates[c][d]);
+                    return;
+                }
+                if (t === 'GeometryCollection') { (g.geometries || []).forEach(walk); }
+            }
+            walk(geom);
+            return out;
+        }
+        function rebuildPoints() {
+            pointsLayer.clearLayers();
+            if (!pointsOn) return;
+            layers.forEach(function (l) {
+                var markers = [];
+                l.features.forEach(function (f) {
+                    if (!f.geometry) return;
+                    collectPoints(f.geometry).forEach(function (c) {
+                        markers.push(L.circleMarker([c[1], c[0]], {
+                            radius: 3, color: l.color, weight: 1,
+                            fillColor: l.color, fillOpacity: 0.9
+                        }).bindPopup('【' + l.name + '】<br>经度 ' + c[0].toFixed(6) + '<br>纬度 ' + c[1].toFixed(6)));
+                    });
+                });
+                if (markers.length) pointsLayer.addLayer(L.layerGroup(markers));
+            });
+            map.removeLayer(pointsLayer);
+            pointsLayer.addTo(map);
+        }
+        function togglePoints() {
+            pointsOn = !pointsOn;
+            if (pointsOn) rebuildPoints(); else map.removeLayer(pointsLayer);
+            document.getElementById('togglePoints').classList.toggle('active', pointsOn);
+        }
+
+        function clearAll() {
+            document.getElementById('jsonInput').value = '';
+            document.getElementById('info').textContent = '要素信息会显示在这里…';
+            closeLayerPop();
+            layers.forEach(function (l) { map.removeLayer(l.layer); });
+            layers = [];
+            pasteSeq = 0;               // 清空后重新从「粘贴 1」开始
+            renderOverlay();
+            map.removeLayer(pointsLayer);
+            pointsOn = false;
+            document.getElementById('togglePoints').classList.remove('active');
+            if (measureMode) { document.getElementById('measureMode').value = ''; setMeasureMode(''); }
+        }
+
+        // ── 比例尺（左下角，公制）──
+        L.control.scale({ imperial: false }).addTo(map);
+
+        // ── 鼠标坐标（右下角，lng,lat）──
+        var coordCtrl = L.control({ position: 'bottomright' });
+        coordCtrl.onAdd = function () {
+            var d = L.DomUtil.create('div', 'coord-box leaflet-control');
+            d.innerHTML = '鼠标: —';
+            this._d = d;
+            return d;
+        };
+        coordCtrl.addTo(map);
+        map.on('mousemove', function (e) {
+            coordCtrl._d.innerHTML = '鼠标: ' + e.latlng.lng.toFixed(6) + ',' + e.latlng.lat.toFixed(6);
+        });
+        map.on('mouseout', function () { coordCtrl._d.innerHTML = '鼠标: —'; });
+
+        // ── 测量：直线 / 折线 / 面积 ──
+        var measureMode = '';          // '', 'line', 'polyline', 'area'
+        var measurePts = [];
+        var measureDone = L.layerGroup().addTo(map);   // 已完成的测量（累积保留）
+        var measureLive = L.layerGroup().addTo(map);   // 进行中的
+        var clickTimer = null;
+        var MODE_HINT = {
+            line: '直线距离：点两个点（自动结束，可连续测）',
+            polyline: '折线距离：连续点，双击结束',
+            area: '面积：连续点，双击闭合'
+        };
+
+        function setMeasureMode(mode) {
+            measureMode = mode;
+            map.off('click', onMeasureClick);
+            clearMeasure();
+            var on = !!mode;
+            map.getContainer().classList.toggle('map-measuring', on);
+            map.getContainer().style.cursor = on ? 'crosshair' : '';
+            if (on) {
+                map.on('click', onMeasureClick);
+                map.closePopup();
+                document.getElementById('info').textContent = MODE_HINT[mode];
+            } else {
+                document.getElementById('info').textContent = '要素信息会显示在这里…';
+            }
+        }
+
+        function clearMeasure() {
+            if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
+            measurePts = [];
+            measureLive.clearLayers();
+            measureDone.clearLayers();
+        }
+
+        function pathLength(pts) {          // 多点累计距离（米）
+            var s = 0;
+            for (var i = 1; i < pts.length; i++) s += pts[i - 1].distanceTo(pts[i]);
+            return s;
+        }
+        function polyArea(pts) {            // 面积（㎡）：局部等距圆柱 + 鞋带公式
+            var lat0 = 0;
+            pts.forEach(function (p) { lat0 += p.lat; });
+            lat0 /= pts.length;
+            var kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 111320, sum = 0;
+            for (var i = 0; i < pts.length; i++) {
+                var a = pts[i], b = pts[(i + 1) % pts.length];
+                sum += (a.lng * kx) * (b.lat * ky) - (b.lng * kx) * (a.lat * ky);
+            }
+            return Math.abs(sum) / 2;
+        }
+        function fmtDist(m) { return (m / 1000).toFixed(3) + ' km'; }
+        function fmtArea(m2) { return (m2 / 1e6).toFixed(4) + ' km²'; }
+
+        function drawShape(layer, pts, mode) {      // 只画不清理（调用方负责清理）
+            pts.forEach(function (p) {
+                L.circleMarker(p, { radius: 4, color: '#e5484d', weight: 2,
+                    fillColor: '#fff', fillOpacity: 1 }).addTo(layer);
+            });
+            if (mode === 'area' && pts.length >= 3) {
+                L.polygon(pts, { color: '#e5484d', weight: 2, dashArray: '6 4',
+                    fillColor: '#e5484d', fillOpacity: 0.15 })
+                    .bindTooltip(fmtArea(polyArea(pts)),
+                        { permanent: true, direction: 'center', className: 'measure-label' })
+                    .addTo(layer);
+            } else if (pts.length >= 2) {
+                L.polyline(pts, { color: '#e5484d', weight: 2, dashArray: '6 4' })
+                    .bindTooltip(fmtDist(pathLength(pts)),
+                        { permanent: true, direction: 'center', className: 'measure-label' })
+                    .addTo(layer);
+            }
+        }
+
+        function onMeasureClick(e) {
+            if (measureMode === 'line') {          // 直线：两点自动结束
+                measurePts.push(e.latlng);
+                if (measurePts.length === 2) {
+                    var d = measurePts[0].distanceTo(measurePts[1]);
+                    drawShape(measureDone, measurePts, 'line');
+                    toast('距离: ' + fmtDist(d));
+                    document.getElementById('info').textContent =
+                        '直线距离: ' + fmtDist(d) + '  (' + Math.round(d) + ' m)\n'
+                        + 'A: ' + measurePts[0].lng.toFixed(6) + ',' + measurePts[0].lat.toFixed(6) + '\n'
+                        + 'B: ' + measurePts[1].lng.toFixed(6) + ',' + measurePts[1].lat.toFixed(6);
+                    measurePts = [];
+                    measureLive.clearLayers();
+                } else {
+                    measureLive.clearLayers();
+                    drawShape(measureLive, measurePts, 'line');
+                }
+                return;
+            }
+            // 折线 / 面积：同一位置快速两击 = 双击 → 结束
+            if (clickTimer) {
+                clearTimeout(clickTimer); clickTimer = null;
+                var last = measurePts[measurePts.length - 1];
+                if (last && last.distanceTo(e.latlng) < 20) { finalizeOpen(); return; }
+            }
+            measurePts.push(e.latlng);
+            measureLive.clearLayers();
+            drawShape(measureLive, measurePts, measureMode);
+            clickTimer = setTimeout(function () { clickTimer = null; }, 250);
+        }
+
+        function finalizeOpen() {
+            if (measureMode === 'area' && measurePts.length >= 3) {
+                var a = polyArea(measurePts);
+                drawShape(measureDone, measurePts, 'area');
+                toast('面积: ' + fmtArea(a));
+                document.getElementById('info').textContent =
+                    '面积: ' + fmtArea(a) + '  (' + Math.round(a) + ' ㎡)';
+            } else if (measureMode === 'polyline' && measurePts.length >= 2) {
+                var dl = pathLength(measurePts);
+                drawShape(measureDone, measurePts, 'polyline');
+                toast('折线距离: ' + fmtDist(dl));
+                document.getElementById('info').textContent =
+                    '折线距离: ' + fmtDist(dl) + '  (' + Math.round(dl) + ' m)';
+            }
+            measurePts = [];
+            measureLive.clearLayers();
+        }
+
+        // ── 弹窗坐标一键复制（lng,lat）──
+        function copyCoord(lng, lat) {
+            var txt = lng.toFixed(6) + ',' + lat.toFixed(6);
+            var done = function () { toast('已复制 ' + txt); };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(txt).then(done,
+                    function () { fallbackCopy(txt, done); });
+            } else { fallbackCopy(txt, done); }
+        }
+        function fallbackCopy(txt, done) {
+            var ta = document.createElement('textarea');
+            ta.value = txt;
+            ta.style.cssText = 'position:fixed;top:-1000px;';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); } catch (e) {}
+            document.body.removeChild(ta);
+            done();
+        }
+        function toast(msg) {
+            var t = document.createElement('div');
+            t.textContent = msg;
+            t.style.cssText = 'position:fixed;left:50%;top:18px;transform:translateX(-50%);'
+                + 'background:rgba(24,28,34,.92);color:#fff;padding:7px 15px;border-radius:8px;'
+                + 'font:12.5px -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;'
+                + 'box-shadow:0 8px 24px rgba(16,24,40,.25);z-index:9999;'
+                + 'transition:opacity .2s;';
+            document.body.appendChild(t);
+            setTimeout(function () { document.body.removeChild(t); }, 1600);
+        }
+        // 任意弹窗打开时，追加"复制坐标"链接（复制弹窗锚点的 lng,lat）
+        map.on('popupopen', function (e) {
+            var ll = e.popup.getLatLng();
+            var el = e.popup.getElement();
+            if (!ll || !el) return;
+            var wrap = el.querySelector('.leaflet-popup-content');
+            if (!wrap) return;
+            var a = document.createElement('a');
+            a.textContent = '复制坐标 (lng,lat)';
+            a.href = '#';
+            a.style.cssText = 'display:inline-block;margin-top:5px;color:#2f6fed;font-weight:600;';
+            a.onclick = function (ev) { ev.preventDefault(); copyCoord(ll.lng, ll.lat); };
+            wrap.appendChild(document.createElement('br'));
+            wrap.appendChild(a);
+        });
+    </script>
+</body>
+</html>

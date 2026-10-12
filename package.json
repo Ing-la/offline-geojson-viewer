@@ -1,0 +1,12 @@
+{
+  "name": "geojson-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "离线 GeoJSON / JSON 查看器：单文件、零运行时依赖",
+  "scripts": {
+    "test": "node tests/test_layers.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
